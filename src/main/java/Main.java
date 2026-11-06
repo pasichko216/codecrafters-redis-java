@@ -1,17 +1,33 @@
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+
+import static utils.Constants.*;
 
 public class Main {
   public static void main(String[] args){
     System.out.println("Logs from your program will appear here!");
         ServerSocket serverSocket = null;
         Socket clientSocket = null;
-        int port = 6379;
+
         try {
-          serverSocket = new ServerSocket(port);
+          serverSocket = new ServerSocket(DEFAULT_PORT);
           serverSocket.setReuseAddress(true);
           clientSocket = serverSocket.accept();
+
+          InputStream in = clientSocket.getInputStream();
+          OutputStream out = clientSocket.getOutputStream();
+
+          BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+          String line;
+
+          while ((line = reader.readLine()) != null) {
+              if (line.equalsIgnoreCase(PING)) {
+                  out.write(PONG_RESPONSE.getBytes());
+                  out.flush();
+              }
+          }
+
         } catch (IOException e) {
           System.out.println("IOException: " + e.getMessage());
         } finally {
