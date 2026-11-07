@@ -1,61 +1,75 @@
 package server;
 
+import command.Command;
+import command.CommandDispatcher;
+import connection.Connection;
+import exception.ProtocolException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import protocol.ErrorCode;
+import protocol.RespParser;
+import protocol.RespWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
-import java.nio.channels.SocketChannel;
-import java.nio.charset.StandardCharsets;
-
-import static utils.Constants.*;
+import java.util.List;
 
 public class ClientHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(RedisServer.class);
+    private static final Logger log = LoggerFactory.getLogger(ClientHandler.class);
+
+    private final RespParser parser = new RespParser();
+    private final CommandDispatcher dispatcher;
+
+    public ClientHandler(CommandDispatcher dispatcher) {
+        this.dispatcher = dispatcher;
+    }
 
     public void handle(SelectionKey key) throws IOException {
-        SocketChannel client = (SocketChannel) key.channel();
-        Integer clientId = (Integer) key.attachment();
-        ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
+        Connection connection = (Connection) key.attachment();
+        ByteBuffer inbound = connection.inbound();
 
-        int bytesRead = client.read(buffer);
+        int bytesRead = connection.channel().read(inbound);
         if (bytesRead == -1) {
-            log.info("Client #{} hung up", clientId);
-            close(key);
+            log.info("Client #{} hung up", connection.id());
+            connection.close();
             return;
         }
+        log.debug("Client #{} sent {} bytes", connection.id(), bytesRead);
 
-        buffer.flip();
-        String data = StandardCharsets.UTF_8.decode(buffer).toString();
-        log.info("Client #{} sent {} bytes: {}", clientId, bytesRead, visible(data));
-
-        for (String line : data.split(CRLF)) {
-            if (line.equalsIgnoreCase(PING)) {
-                send(client, clientId, PONG_RESPONSE);
-            } else {
-                log.debug("Client #{} line ignored: {}", clientId, visible(line));
-            }
-        }
-    }
-
-    public void close(SelectionKey key) {
-        Integer clientId = (Integer) key.attachment();
+        inbound.flip();
         try {
-            key.channel().close();
-            log.info("Client #{} connection closed", clientId);
-        } catch (IOException e) {
-            log.warn("Client #{} failed to close cleanly: {}", clientId, e.getMessage());
+            processCommands(connection);
+        } catch (ProtocolException e) {
+            log.warn("Client #{} protocol error: {}", connection.id(), e.getMessage());
+            connection.send(RespWriter.error(ErrorCode.ERR, "Protocol error: " + e.getMessage()));connection.close();
+            return;
+        }
+        inbound.compact();
+
+        if (!inbound.hasRemaining()) {
+            log.warn("Client #{} request too large", connection.id());
+            connection.send(RespWriter.error(ErrorCode.ERR, "Protocol error: request too large"));
+            connection.close();
         }
     }
 
-    private void send(SocketChannel client, Integer clientId, String response) throws IOException {
-        client.write(ByteBuffer.wrap(response.getBytes(StandardCharsets.UTF_8)));
-        log.info("Client #{} <- {}", clientId, visible(response));
+    private void processCommands(Connection connection) throws IOException {
+        List<String> parts;
+        while ((parts = parser.parse(connection.inbound())) != null) {
+            if (parts.isEmpty()) {
+                continue;
+            }
+            Command command = Command.of(parts);
+            log.info("Client #{} command: {} {}", connection.id(), command.name(), command.args());
+
+            String response = dispatcher.dispatch(command, connection);
+            log.info("Client #{} <- {}", connection.id(), visible(response));
+            connection.send(response);
+        }
     }
 
-    // make \r и \n visible in logs
     private String visible(String text) {
         return text.replace("\r", "\\r").replace("\n", "\\n");
     }

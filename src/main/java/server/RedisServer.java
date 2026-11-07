@@ -1,5 +1,7 @@
 package server;
 
+import config.ServerConfig;
+import connection.Connection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,12 +17,14 @@ import java.util.Iterator;
 public class RedisServer {
 
     private static final Logger log = LoggerFactory.getLogger(RedisServer.class);
-    private final int port;
-    private final ClientHandler clientHandler = new ClientHandler();
+
+    private final ServerConfig config;
+    private final ClientHandler clientHandler;
     private int nextClientId = 1;
 
-    public RedisServer(int port) {
-        this.port = port;
+    public RedisServer(ServerConfig config, ClientHandler clientHandler) {
+        this.config = config;
+        this.clientHandler = clientHandler;
     }
 
     public void start() {
@@ -28,11 +32,11 @@ public class RedisServer {
              ServerSocketChannel serverChannel = ServerSocketChannel.open()) {
 
             serverChannel.setOption(StandardSocketOptions.SO_REUSEADDR, true);
-            serverChannel.bind(new InetSocketAddress(port));
+            serverChannel.bind(new InetSocketAddress(config.port()));
             serverChannel.configureBlocking(false);
             serverChannel.register(selector, SelectionKey.OP_ACCEPT);
 
-            log.info("Redis server listening on port {}", port);
+            log.info("Redis server listening on port {}", config.port());
 
             runEventLoop(selector, serverChannel);
 
@@ -57,15 +61,24 @@ public class RedisServer {
     }
 
     private void dispatch(SelectionKey key, Selector selector, ServerSocketChannel serverChannel) {
+        if (!key.isValid()) {
+            return;
+        }
         try {
             if (key.isAcceptable()) {
                 accept(serverChannel, selector);
             } else if (key.isReadable()) {
                 clientHandler.handle(key);
+            } else if (key.isWritable()) {
+                ((Connection) key.attachment()).flush();
             }
         } catch (IOException e) {
-            log.warn("Client #{} error: {}", key.attachment(), e.getMessage());
-            clientHandler.close(key);
+            if (key.attachment() instanceof Connection connection) {
+                log.warn("Client #{} error: {}", connection.id(), e.getMessage());
+                connection.close();
+            } else {
+                log.error("Accept failed: {}", e.getMessage(), e);
+            }
         }
     }
 
@@ -74,11 +87,10 @@ public class RedisServer {
         if (client == null) {
             return;
         }
-        client.configureBlocking(false);
 
-        int clientId = nextClientId++;
-        client.register(selector, SelectionKey.OP_READ, clientId);
+        Connection connection = new Connection(nextClientId++, client);
+        connection.register(selector);
 
-        log.info("Client #{} connected from {}", clientId, client.getRemoteAddress());
+        log.info("Client #{} connected from {}", connection.id(), client.getRemoteAddress());
     }
 }

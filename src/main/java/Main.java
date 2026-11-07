@@ -1,7 +1,12 @@
+import command.CommandDispatcher;
+import command.CommandRegistry;
+import config.ServerConfig;
+import server.ClientHandler;
 import server.RedisServer;
 
-import static utils.Constants.DEFAULT_PORT;
+void main(String[] args) {
+    ServerConfig config = ServerConfig.fromArgs(args);
+    CommandDispatcher dispatcher = CommandRegistry.createDispatcher();
 
-void main() {
-    new RedisServer(DEFAULT_PORT).start();
+    new RedisServer(config, new ClientHandler(dispatcher)).start();
 }
