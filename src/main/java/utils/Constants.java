@@ -2,6 +2,7 @@ package utils;
 
 public class Constants {
     public static final int DEFAULT_PORT = 6379;
+    public static final int BUFFER_SIZE = 1024;
 
     public static final String PING = "PING";
     public static final String PONG = "PONG";
