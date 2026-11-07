@@ -1,6 +1,7 @@
 package server;
 
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -11,9 +12,9 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 
-@Slf4j
 public class RedisServer {
 
+    private static final Logger log = LoggerFactory.getLogger(RedisServer.class);
     private final int port;
     private final ClientHandler clientHandler = new ClientHandler();
     private int nextClientId = 1;
